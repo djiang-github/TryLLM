@@ -100,21 +100,56 @@ class WikiAnimalScraper:
         
         # Get title
         title = soup.find('h1', {'id': 'firstHeading'}).text if soup.find('h1', {'id': 'firstHeading'}) else ''
-        
+        if not title:
+            return None
+            
         # Get main content
         content_div = soup.find('div', {'id': 'mw-content-text'})
         if not content_div:
             return None
             
-        # Find the first paragraph (usually contains the most relevant information)
-        first_p = None
-        for p in content_div.find_all('p', recursive=False):
-            if p.text.strip() and not p.find_parent('table') and not p.find_parent('div', class_='hatnote'):
-                first_p = p
-                break
-                
-        if not first_p:
+        # Get categories first to verify it's an animal page
+        categories = []
+        catlinks = soup.find('div', {'id': 'mw-normal-catlinks'})
+        if catlinks:
+            categories = [link.text for link in catlinks.find_all('a')]
+            
+        # Check if it's actually an animal-related page
+        if not any('animal' in cat.lower() or 
+                  'fauna' in cat.lower() or 
+                  'species' in cat.lower() or
+                  'mammals' in cat.lower() or
+                  'birds' in cat.lower() or
+                  'reptiles' in cat.lower() or
+                  'amphibians' in cat.lower() or
+                  'fish' in cat.lower() or
+                  'insects' in cat.lower() for cat in categories):
             return None
+            
+        # Get all paragraphs after removing unwanted elements
+        main_content = content_div.find('div', {'class': 'mw-parser-output'})
+        if not main_content:
+            return None
+            
+        # Remove unwanted elements
+        for element in main_content.find_all(['table', 'div', 'script', 'style', 'sup', 'span']):
+            if element.get('class') and any('infobox' in c for c in element.get('class', [])):
+                continue  # Keep infoboxes
+            element.decompose()
+            
+        # Get all paragraphs
+        paragraphs = main_content.find_all('p', recursive=False)
+        main_text = '\n\n'.join(p.get_text().strip() for p in paragraphs if p.get_text().strip())
+        
+        if not main_text:
+            return None
+            
+        return {
+            'title': title,
+            'url': url,
+            'main_text': main_text,
+            'categories': categories
+        }
             
         # Get all paragraphs after removing unwanted elements
         main_content = content_div.find('div', {'class': 'mw-parser-output'})
@@ -185,8 +220,9 @@ class WikiAnimalScraper:
                 print(f"Error processing category {current_url}: {str(e)}")
             
             # Save progress periodically
-            if self.total_categories_processed % 20 == 0:
+            if self.total_categories_processed % 20 == 0 and len(self.animal_data) > 0:
                 self.save_data('animal_data_partial.json')
+                print(f"\nSaved {len(self.animal_data)} entries to animal_data_partial.json")
             
             time.sleep(1)  # Rate limiting
             
@@ -215,6 +251,7 @@ class WikiAnimalScraper:
                         print(f"Latest addition: {page_info['title']}")
                         # Save progress periodically
                         self.save_data('animal_data_partial.json')
+                        print(f"Saved {len(self.animal_data)} entries to animal_data_partial.json")
             except Exception as e:
                 print(f"Error processing {page_url}: {str(e)}")
             
@@ -222,8 +259,13 @@ class WikiAnimalScraper:
     
     def save_data(self, filename: str = 'animal_data.json'):
         """Save the collected data to a JSON file."""
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(self.animal_data, f, ensure_ascii=False, indent=2)
+        try:
+            print(f"\nAttempting to save {len(self.animal_data)} entries to {filename}")
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(self.animal_data, f, ensure_ascii=False, indent=2)
+            print(f"Successfully saved data to {filename}")
+        except Exception as e:
+            print(f"Error saving data to {filename}: {str(e)}")
 
 if __name__ == "__main__":
     scraper = WikiAnimalScraper()
